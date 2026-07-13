@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
-  Activity,
   AlertTriangle,
   BarChart3,
   Gauge,
@@ -14,15 +13,15 @@ import {
   Wifi,
 } from "lucide-react";
 
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import EmptyState from "@/components/EmptyState";
+import HealthCard from "@/components/HealthCard";
+import IncidentCard from "@/components/IncidentCard";
+import IncidentTimeline from "@/components/IncidentTimeline";
+import KPICard from "@/components/KPICard";
+import LoadingSkeleton from "@/components/LoadingSkeleton";
+import MetricChart from "@/components/MetricChart";
+import RegionalChart from "@/components/RegionalChart";
+import StreamCard from "@/components/StreamCard";
 
 import {
   getDashboardSummary,
@@ -85,64 +84,34 @@ const SCENARIOS: Array<{
   },
 ];
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
+type PaginatedResponse<T> = {
+  results?: T[];
+};
 
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-function getStatusClass(status: Stream["status"]): string {
-  if (status === "healthy") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-
-  if (status === "degraded") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-
-  return "border-red-200 bg-red-50 text-red-700";
-}
-
-function getSeverityClass(
-  severity: Incident["severity"],
-): string {
-  if (severity === "critical") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
-
-  if (severity === "high") {
-    return "border-orange-200 bg-orange-50 text-orange-700";
-  }
-
-  if (severity === "medium") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-
-  return "border-blue-200 bg-blue-50 text-blue-700";
-}
+type ChartDataPoint = {
+  id: number;
+  time: string;
+  viewers: number;
+  latency: number;
+  buffer: number;
+  failure: number;
+};
 
 function normalizeListResponse<T>(
-  data: T[] | { results?: T[] },
+  data: T[] | PaginatedResponse<T>,
 ): T[] {
   if (Array.isArray(data)) {
     return data;
   }
 
   return data.results ?? [];
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 export default function Home() {
@@ -155,6 +124,7 @@ export default function Home() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
   const [runningScenario, setRunningScenario] =
     useState<Scenario | null>(null);
 
@@ -163,9 +133,9 @@ export default function Home() {
     useState<Date | null>(null);
 
   const loadDashboard = useCallback(
-    async (showRefresh = false) => {
+    async (showRefreshIndicator = false) => {
       try {
-        if (showRefresh) {
+        if (showRefreshIndicator) {
           setRefreshing(true);
         }
 
@@ -187,7 +157,9 @@ export default function Home() {
 
         setStreams(
           normalizeListResponse(
-            streamsData as Stream[] | { results?: Stream[] },
+            streamsData as
+              | Stream[]
+              | PaginatedResponse<Stream>,
           ),
         );
 
@@ -195,7 +167,7 @@ export default function Home() {
           normalizeListResponse(
             metricsData as
               | StreamMetric[]
-              | { results?: StreamMetric[] },
+              | PaginatedResponse<StreamMetric>,
           ),
         );
 
@@ -203,16 +175,19 @@ export default function Home() {
           normalizeListResponse(
             incidentsData as
               | Incident[]
-              | { results?: Incident[] },
+              | PaginatedResponse<Incident>,
           ),
         );
 
         setLastUpdated(new Date());
       } catch (requestError) {
-        console.error(requestError);
+        console.error(
+          "Dashboard loading failed:",
+          requestError,
+        );
 
         setError(
-          "Could not connect to the Django backend. Make sure it is running on port 8000.",
+          "Could not connect to the Django backend. Make sure it is running on port 8000 and CORS is configured.",
         );
       } finally {
         setLoading(false);
@@ -234,7 +209,9 @@ export default function Home() {
     };
   }, [loadDashboard]);
 
-  async function handleScenario(scenario: Scenario) {
+  async function handleScenario(
+    scenario: Scenario,
+  ): Promise<void> {
     try {
       setRunningScenario(scenario);
       setError("");
@@ -242,8 +219,14 @@ export default function Home() {
       await runScenario(scenario, 5);
       await loadDashboard(true);
     } catch (requestError) {
-      console.error(requestError);
-      setError("Simulation failed. Check the backend terminal.");
+      console.error(
+        "Scenario simulation failed:",
+        requestError,
+      );
+
+      setError(
+        "Simulation failed. Check the Django backend terminal and simulator endpoint.",
+      );
     } finally {
       setRunningScenario(null);
     }
@@ -251,23 +234,24 @@ export default function Home() {
 
   const sortedMetrics = useMemo(() => {
     return [...metrics].sort(
-      (first, second) =>
-        new Date(first.timestamp).getTime() -
-        new Date(second.timestamp).getTime(),
+      (firstMetric, secondMetric) =>
+        new Date(firstMetric.timestamp).getTime() -
+        new Date(secondMetric.timestamp).getTime(),
     );
   }, [metrics]);
 
-  const chartData = useMemo(() => {
+  const chartData = useMemo<ChartDataPoint[]>(() => {
     return sortedMetrics.slice(-30).map((metric) => ({
       id: metric.id,
-      time: new Date(metric.timestamp).toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        },
-      ),
+
+      time: new Date(
+        metric.timestamp,
+      ).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+
       viewers: metric.concurrent_viewers,
       latency: metric.cdn_latency_ms,
       buffer: metric.buffer_ratio,
@@ -276,20 +260,21 @@ export default function Home() {
   }, [sortedMetrics]);
 
   const latestMetricsByStream = useMemo(() => {
-    const map = new Map<number, StreamMetric>();
+    const latestMetricMap =
+      new Map<number, StreamMetric>();
 
     for (const metric of sortedMetrics) {
-      map.set(metric.stream, metric);
+      latestMetricMap.set(metric.stream, metric);
     }
 
-    return map;
+    return latestMetricMap;
   }, [sortedMetrics]);
 
   const sortedIncidents = useMemo(() => {
     return [...incidents].sort(
-      (first, second) =>
-        new Date(second.created_at).getTime() -
-        new Date(first.created_at).getTime(),
+      (firstIncident, secondIncident) =>
+        new Date(secondIncident.created_at).getTime() -
+        new Date(firstIncident.created_at).getTime(),
     );
   }, [incidents]);
 
@@ -372,10 +357,13 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => void loadDashboard(true)}
+                onClick={() =>
+                  void loadDashboard(true)
+                }
                 disabled={refreshing}
-                className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
                 aria-label="Refresh dashboard"
+                title="Refresh dashboard"
+                className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <RefreshCw
                   className={`h-5 w-5 ${
@@ -389,539 +377,221 @@ export default function Home() {
 
         {error ? (
           <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <div className="flex gap-3">
+            <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p>{error}</p>
+
+              <div>
+                <p className="font-semibold">
+                  Backend connection error
+                </p>
+
+                <p className="mt-1">{error}</p>
+              </div>
             </div>
           </div>
         ) : null}
 
-        <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          {kpis.map((kpi) => {
-            const Icon = kpi.icon;
+        {loading &&
+        streams.length === 0 &&
+        metrics.length === 0 ? (
+          <LoadingSkeleton />
+        ) : (
+          <>
+            <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+              {kpis.map((kpi) => (
+                <KPICard
+                  key={kpi.label}
+                  label={kpi.label}
+                  value={kpi.value}
+                  helper={kpi.helper}
+                  icon={kpi.icon}
+                  iconClass={kpi.iconClass}
+                  loading={loading}
+                />
+              ))}
+            </section>
 
-            return (
-              <article
-                key={kpi.label}
-                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div className="mb-5 flex items-center justify-between">
-                  <div
-                    className={`rounded-xl p-2.5 ${kpi.iconClass}`}
-                  >
-                    <Icon className="h-5 w-5" />
-                  </div>
+            <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <HealthCard
+                label="Total streams"
+                value={summary.total_streams}
+                valueClass="text-slate-900"
+              />
 
-                  <Activity className="h-4 w-4 text-slate-300" />
-                </div>
+              <HealthCard
+                label="Healthy"
+                value={summary.healthy_streams}
+                valueClass="text-emerald-600"
+              />
 
-                <p className="text-sm font-medium text-slate-500">
-                  {kpi.label}
-                </p>
+              <HealthCard
+                label="Degraded"
+                value={summary.degraded_streams}
+                valueClass="text-amber-600"
+              />
 
-                <p className="mt-2 text-3xl font-bold text-slate-900">
-                  {loading ? "—" : kpi.value}
-                </p>
+              <HealthCard
+                label="Critical"
+                value={summary.critical_streams}
+                valueClass="text-red-600"
+              />
+            </section>
 
-                <p className="mt-2 text-xs text-slate-400">
-                  {kpi.helper}
-                </p>
-              </article>
-            );
-          })}
-        </section>
-
-        <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <HealthCard
-            label="Total streams"
-            value={summary.total_streams}
-            valueClass="text-slate-900"
-          />
-
-          <HealthCard
-            label="Healthy"
-            value={summary.healthy_streams}
-            valueClass="text-emerald-600"
-          />
-
-          <HealthCard
-            label="Degraded"
-            value={summary.degraded_streams}
-            valueClass="text-amber-600"
-          />
-
-          <HealthCard
-            label="Critical"
-            value={summary.critical_streams}
-            valueClass="text-red-600"
-          />
-        </section>
-
-        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-5">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Simulation controls
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Generate scenarios and observe their impact on
-              viewers, QoE metrics and incidents.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {SCENARIOS.map((scenario) => {
-              const isRunning =
-                runningScenario === scenario.value;
-
-              return (
-                <button
-                  key={scenario.value}
-                  type="button"
-                  onClick={() =>
-                    void handleScenario(scenario.value)
-                  }
-                  disabled={runningScenario !== null}
-                  className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-left transition hover:border-cyan-300 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="block text-sm font-semibold text-cyan-800">
-                    {isRunning ? "Running..." : scenario.label}
-                  </span>
-
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">
-                    {scenario.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <section className="mb-6 grid gap-6 xl:grid-cols-2">
-          <MetricChart
-            title="Concurrent viewers"
-            description="Viewer load across recent metric samples"
-            data={chartData}
-            dataKey="viewers"
-            unit=""
-          />
-
-          <MetricChart
-            title="CDN latency"
-            description="Recent CDN response time"
-            data={chartData}
-            dataKey="latency"
-            unit=" ms"
-          />
-
-          <MetricChart
-            title="Buffer ratio"
-            description="Percentage of playback time spent buffering"
-            data={chartData}
-            dataKey="buffer"
-            unit="%"
-          />
-
-          <MetricChart
-            title="Failure rate"
-            description="Recent playback and startup failures"
-            data={chartData}
-            dataKey="failure"
-            unit="%"
-          />
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Active streams
+            <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-5">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Simulation controls
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Latest stream health and QoE metrics
+                  Generate scenarios and observe their
+                  impact on viewers, QoE metrics and
+                  incidents.
                 </p>
               </div>
 
-              <Server className="h-5 w-5 text-slate-400" />
-            </div>
-
-            <div className="space-y-3">
-              {loading && streams.length === 0 ? (
-                <EmptyState text="Loading active streams..." />
-              ) : streams.length === 0 ? (
-                <EmptyState text="No streams found. Run a scenario to generate stream data." />
-              ) : (
-                streams.map((stream) => {
-                  const metric =
-                    latestMetricsByStream.get(stream.id);
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                {SCENARIOS.map((scenario) => {
+                  const isRunning =
+                    runningScenario === scenario.value;
 
                   return (
-                    <article
-                      key={stream.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50/70 p-4"
+                    <button
+                      key={scenario.value}
+                      type="button"
+                      onClick={() =>
+                        void handleScenario(
+                          scenario.value,
+                        )
+                      }
+                      disabled={
+                        runningScenario !== null
+                      }
+                      className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-left transition hover:border-cyan-300 hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <div className="flex flex-col gap-4">
-                        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                          <div>
-                            <div className="mb-2 flex flex-wrap items-center gap-2">
-                              <h3 className="font-semibold text-slate-900">
-                                {stream.name}
-                              </h3>
-
-                              <span
-                                className={`rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${getStatusClass(
-                                  stream.status,
-                                )}`}
-                              >
-                                {stream.status}
-                              </span>
-                            </div>
-
-                            <p className="text-sm text-slate-600">
-                              {stream.event_name}
-                            </p>
-
-                            <p className="mt-1 text-xs text-slate-400">
-                              {stream.region}
-                            </p>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-x-7 gap-y-3 sm:grid-cols-4">
-                            <MetricValue
-                              label="Viewers"
-                              value={
-                                metric
-                                  ? formatNumber(
-                                      metric.concurrent_viewers,
-                                    )
-                                  : "—"
-                              }
-                            />
-
-                            <MetricValue
-                              label="Latency"
-                              value={
-                                metric
-                                  ? `${metric.cdn_latency_ms.toFixed(
-                                      0,
-                                    )} ms`
-                                  : "—"
-                              }
-                            />
-
-                            <MetricValue
-                              label="Buffer"
-                              value={
-                                metric
-                                  ? `${metric.buffer_ratio.toFixed(
-                                      1,
-                                    )}%`
-                                  : "—"
-                              }
-                            />
-
-                            <MetricValue
-                              label="Failures"
-                              value={
-                                metric
-                                  ? `${metric.failure_rate.toFixed(
-                                      1,
-                                    )}%`
-                                  : "—"
-                              }
-                            />
-                          </div>
-                        </div>
-
-                        {metric ? (
-                          <div className="grid gap-3 border-t border-slate-200 pt-4 sm:grid-cols-2 lg:grid-cols-4">
-                            <MetricValue
-                              label="Bitrate"
-                              value={`${metric.bitrate_kbps.toFixed(
-                                0,
-                              )} kbps`}
-                            />
-
-                            <MetricValue
-                              label="Startup time"
-                              value={`${metric.startup_time_ms.toFixed(
-                                0,
-                              )} ms`}
-                            />
-
-                            <MetricValue
-                              label="Packet loss"
-                              value={`${metric.packet_loss.toFixed(
-                                2,
-                              )}%`}
-                            />
-
-                            <MetricValue
-                              label="FPS"
-                              value={metric.fps.toFixed(0)}
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                    </article>
-                  );
-                })
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-5">
-              <h2 className="text-lg font-semibold">
-                Recent incidents
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                Automatically generated from anomalous metrics
-              </p>
-            </div>
-
-            <div className="max-h-[700px] space-y-3 overflow-y-auto pr-1">
-              {loading && incidents.length === 0 ? (
-                <EmptyState text="Loading recent incidents..." />
-              ) : sortedIncidents.length === 0 ? (
-                <EmptyState text="No incidents detected yet." />
-              ) : (
-                sortedIncidents.slice(0, 10).map((incident) => (
-                  <article
-                    key={incident.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50/70 p-4"
-                  >
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold text-slate-900">
-                          {incident.title}
-                        </h3>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          {incident.stream_name} · {incident.region}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${getSeverityClass(
-                          incident.severity,
-                        )}`}
-                      >
-                        {incident.severity}
+                      <span className="block text-sm font-semibold text-cyan-800">
+                        {isRunning
+                          ? "Running..."
+                          : scenario.label}
                       </span>
-                    </div>
 
-                    <div className="mb-3 grid grid-cols-2 gap-3">
-                      <MetricValue
-                        label="Affected users"
-                        value={formatNumber(
-                          incident.affected_users,
-                        )}
+                      <span className="mt-1 block text-xs leading-5 text-slate-500">
+                        {scenario.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="mb-6 grid gap-6 xl:grid-cols-2">
+              <MetricChart
+                title="Concurrent viewers"
+                description="Viewer load across recent metric samples"
+                data={chartData}
+                dataKey="viewers"
+                unit=""
+              />
+
+              <MetricChart
+                title="CDN latency"
+                description="Recent CDN response time"
+                data={chartData}
+                dataKey="latency"
+                unit=" ms"
+              />
+
+              <MetricChart
+                title="Buffer ratio"
+                description="Percentage of playback time spent buffering"
+                data={chartData}
+                dataKey="buffer"
+                unit="%"
+              />
+
+              <MetricChart
+                title="Failure rate"
+                description="Recent playback and startup failures"
+                data={chartData}
+                dataKey="failure"
+                unit="%"
+              />
+            </section>
+
+            <section className="mb-6 grid gap-6 xl:grid-cols-2">
+              <RegionalChart metrics={metrics} />
+
+              <IncidentTimeline
+                incidents={sortedIncidents}
+              />
+            </section>
+
+            <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">
+                      Active streams
+                    </h2>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Latest stream health and QoE metrics
+                    </p>
+                  </div>
+
+                  <Server className="h-5 w-5 text-slate-400" />
+                </div>
+
+                <div className="space-y-3">
+                  {streams.length === 0 ? (
+                    <EmptyState text="No streams found. Run a scenario to generate stream data." />
+                  ) : (
+                    streams.map((stream) => (
+                      <StreamCard
+                        key={stream.id}
+                        stream={stream}
+                        metric={
+                          latestMetricsByStream.get(
+                            stream.id,
+                          ) ?? null
+                        }
                       />
+                    ))
+                  )}
+                </div>
+              </section>
 
-                      <MetricValue
-                        label="Confidence"
-                        value={`${(
-                          incident.confidence_score * 100
-                        ).toFixed(0)}%`}
-                      />
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-5">
+                  <h2 className="text-lg font-semibold text-slate-900">
+                    Recent incidents
+                  </h2>
 
-                      <MetricValue
-                        label="Status"
-                        value={incident.status}
-                      />
+                  <p className="mt-1 text-sm text-slate-500">
+                    Automatically generated from anomalous
+                    metrics
+                  </p>
+                </div>
 
-                      <MetricValue
-                        label="Created"
-                        value={formatDateTime(
-                          incident.created_at,
-                        )}
-                      />
-                    </div>
-
-                    <div className="border-t border-slate-200 pt-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                        Probable root cause
-                      </p>
-
-                      <p className="mt-1 text-sm leading-6 text-slate-600">
-                        {incident.probable_root_cause ||
-                          "Root-cause analysis pending."}
-                      </p>
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-          </section>
-        </section>
-      </div>
-    </main>
-  );
-}
-
-type MetricChartData = {
-  id: number;
-  time: string;
-  viewers: number;
-  latency: number;
-  buffer: number;
-  failure: number;
-};
-
-type MetricChartProps = {
-  title: string;
-  description: string;
-  data: MetricChartData[];
-  dataKey: keyof Pick<
-    MetricChartData,
-    "viewers" | "latency" | "buffer" | "failure"
-  >;
-  unit: string;
-};
-
-function MetricChart({
-  title,
-  description,
-  data,
-  dataKey,
-  unit,
-}: MetricChartProps) {
-  return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-5">
-        <h2 className="font-semibold text-slate-900">
-          {title}
-        </h2>
-
-        <p className="mt-1 text-sm text-slate-500">
-          {description}
-        </p>
-      </div>
-
-      <div className="h-64">
-        {data.length === 0 ? (
-          <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">
-            Run a scenario to generate chart data.
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="#e2e8f0"
-              />
-
-              <XAxis
-                dataKey="time"
-                tick={{
-                  fill: "#64748b",
-                  fontSize: 11,
-                }}
-                axisLine={false}
-                tickLine={false}
-                minTickGap={28}
-              />
-
-              <YAxis
-                tick={{
-                  fill: "#64748b",
-                  fontSize: 11,
-                }}
-                axisLine={false}
-                tickLine={false}
-                width={62}
-              />
-
-              <Tooltip
-                contentStyle={{
-                  background: "#ffffff",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "12px",
-                  color: "#0f172a",
-                  boxShadow:
-                    "0 10px 30px rgba(15, 23, 42, 0.08)",
-                }}
-                labelStyle={{
-                  color: "#475569",
-                }}
-                itemStyle={{
-                  color: "#0891b2",
-                }}
-                formatter={(value) => [
-                  `${Number(value).toLocaleString()}${unit}`,
-                  title,
-                ]}
-              />
-
-              <Line
-                type="monotone"
-                dataKey={dataKey}
-                stroke="#0891b2"
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={{
-                  r: 5,
-                  fill: "#0891b2",
-                  stroke: "#ffffff",
-                  strokeWidth: 2,
-                }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+                <div className="max-h-[700px] space-y-3 overflow-y-auto pr-1">
+                  {sortedIncidents.length === 0 ? (
+                    <EmptyState text="No incidents detected yet." />
+                  ) : (
+                    sortedIncidents
+                      .slice(0, 10)
+                      .map((incident) => (
+                        <IncidentCard
+                          key={incident.id}
+                          incident={incident}
+                        />
+                      ))
+                  )}
+                </div>
+              </section>
+            </section>
+          </>
         )}
       </div>
-    </article>
-  );
-}
-
-function HealthCard({
-  label,
-  value,
-  valueClass,
-}: {
-  label: string;
-  value: number;
-  valueClass: string;
-}) {
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-        {label}
-      </p>
-
-      <p className={`mt-1 text-2xl font-bold ${valueClass}`}>
-        {value}
-      </p>
-    </article>
-  );
-}
-
-function MetricValue({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div>
-      <p className="text-xs text-slate-400">{label}</p>
-
-      <p className="mt-1 font-medium capitalize text-slate-700">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-400">
-      {text}
-    </div>
+    </main>
   );
 }
