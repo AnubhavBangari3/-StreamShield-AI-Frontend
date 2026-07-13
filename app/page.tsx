@@ -132,70 +132,64 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] =
     useState<Date | null>(null);
 
-  const loadDashboard = useCallback(
-    async (showRefreshIndicator = false) => {
-      try {
-        if (showRefreshIndicator) {
-          setRefreshing(true);
-        }
-
-        setError("");
-
-        const [
-          dashboardData,
-          streamsData,
-          metricsData,
-          incidentsData,
-        ] = await Promise.all([
-          getDashboardSummary(),
-          getStreams(),
-          getMetrics(),
-          getIncidents(),
-        ]);
-
-        setSummary(dashboardData);
-
-        setStreams(
-          normalizeListResponse(
-            streamsData as
-              | Stream[]
-              | PaginatedResponse<Stream>,
-          ),
-        );
-
-        setMetrics(
-          normalizeListResponse(
-            metricsData as
-              | StreamMetric[]
-              | PaginatedResponse<StreamMetric>,
-          ),
-        );
-
-        setIncidents(
-          normalizeListResponse(
-            incidentsData as
-              | Incident[]
-              | PaginatedResponse<Incident>,
-          ),
-        );
-
-        setLastUpdated(new Date());
-      } catch (requestError) {
-        console.error(
-          "Dashboard loading failed:",
-          requestError,
-        );
-
-        setError(
-          "Could not connect to the Django backend. Make sure it is running on port 8000 and CORS is configured.",
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+const loadDashboard = useCallback(
+  async (showRefreshIndicator = false) => {
+    try {
+      if (showRefreshIndicator) {
+        setRefreshing(true);
       }
-    },
-    [],
-  );
+
+      setError("");
+
+      const [
+        dashboardData,
+        streamsData,
+        metricsData,
+        incidentsData,
+      ] = await Promise.all([
+        getDashboardSummary(),
+        getStreams(),
+        getMetrics(),
+        getIncidents(),
+      ]);
+
+      setSummary(dashboardData);
+
+      setStreams(
+        Array.isArray(streamsData)
+          ? streamsData
+          : streamsData.results ?? [],
+      );
+
+      setMetrics(
+        Array.isArray(metricsData)
+          ? metricsData
+          : metricsData.results ?? [],
+      );
+
+      setIncidents(
+        Array.isArray(incidentsData)
+          ? incidentsData
+          : incidentsData.results ?? [],
+      );
+
+      setLastUpdated(new Date());
+    } catch (requestError) {
+      console.error(
+        "Dashboard loading failed:",
+        requestError,
+      );
+
+      setError(
+        "Dashboard data could not be loaded.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  },
+  [],
+);
 
   useEffect(() => {
     void loadDashboard();
@@ -561,33 +555,36 @@ export default function Home() {
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-5">
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Recent incidents
-                  </h2>
+             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+  <div className="mb-5">
+    <h2 className="text-lg font-semibold text-slate-900">
+      Recent incidents
+    </h2>
 
-                  <p className="mt-1 text-sm text-slate-500">
-                    Automatically generated from anomalous
-                    metrics
-                  </p>
-                </div>
+    <p className="mt-1 text-sm text-slate-500">
+      Automatically generated from anomalous metrics
+    </p>
+  </div>
 
-                <div className="max-h-[700px] space-y-3 overflow-y-auto pr-1">
-                  {sortedIncidents.length === 0 ? (
-                    <EmptyState text="No incidents detected yet." />
-                  ) : (
-                    sortedIncidents
-                      .slice(0, 10)
-                      .map((incident) => (
-                        <IncidentCard
-                          key={incident.id}
-                          incident={incident}
-                        />
-                      ))
-                  )}
-                </div>
-              </section>
+  <div className="max-h-[760px] overflow-y-auto pr-2">
+    {loading ? (
+      <LoadingSkeleton count={3} />
+    ) : sortedIncidents.length === 0 ? (
+      <EmptyState text="No incidents detected yet." />
+    ) : (
+      <div className="space-y-4">
+        {sortedIncidents
+          .slice(0, 10)
+          .map((incident) => (
+            <IncidentCard
+              key={incident.id}
+              incident={incident}
+            />
+          ))}
+      </div>
+    )}
+  </div>
+</section>
             </section>
           </>
         )}

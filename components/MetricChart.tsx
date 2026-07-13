@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 
-type MetricChartData = {
+export type MetricChartData = {
   id: number;
   time: string;
   viewers: number;
@@ -22,18 +22,15 @@ type MetricChartData = {
 type MetricChartProps = {
   title: string;
   description: string;
-  data: MetricChartData[];
-  dataKey: keyof Pick<
-    MetricChartData,
-    "viewers" | "latency" | "buffer" | "failure"
-  >;
+  data?: MetricChartData[];
+  dataKey: "viewers" | "latency" | "buffer" | "failure";
   unit: string;
 };
 
 export default function MetricChart({
   title,
   description,
-  data,
+  data = [],
   dataKey,
   unit,
 }: MetricChartProps) {
@@ -52,14 +49,19 @@ export default function MetricChart({
       <div className="h-64">
         {data.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">
-            Run a scenario to generate chart data.
+            No metric data available.
           </div>
         ) : (
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-          >
-            <LineChart data={data}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+              data={data}
+              margin={{
+                top: 5,
+                right: 10,
+                left: 0,
+                bottom: 0,
+              }}
+            >
               <CartesianGrid
                 strokeDasharray="3 3"
                 stroke="#e2e8f0"
@@ -83,7 +85,7 @@ export default function MetricChart({
                 }}
                 axisLine={false}
                 tickLine={false}
-                width={62}
+                width={65}
               />
 
               <Tooltip
@@ -97,9 +99,6 @@ export default function MetricChart({
                 }}
                 labelStyle={{
                   color: "#475569",
-                }}
-                itemStyle={{
-                  color: "#0891b2",
                 }}
                 formatter={(value) => [
                   `${Number(value).toLocaleString()}${unit}`,

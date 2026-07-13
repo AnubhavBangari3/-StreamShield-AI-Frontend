@@ -16,19 +16,19 @@ type IncidentTimelineProps = {
 function getSeverityClass(
   severity: Incident["severity"],
 ): string {
-  if (severity === "critical") {
-    return "border-red-200 bg-red-50 text-red-700";
-  }
+  switch (severity) {
+    case "critical":
+      return "border-red-200 bg-red-50 text-red-700";
 
-  if (severity === "high") {
-    return "border-orange-200 bg-orange-50 text-orange-700";
-  }
+    case "high":
+      return "border-orange-200 bg-orange-50 text-orange-700";
 
-  if (severity === "medium") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
+    case "medium":
+      return "border-amber-200 bg-amber-50 text-amber-700";
 
-  return "border-blue-200 bg-blue-50 text-blue-700";
+    default:
+      return "border-blue-200 bg-blue-50 text-blue-700";
+  }
 }
 
 function getStatusIcon(status: Incident["status"]) {
@@ -39,17 +39,17 @@ function getStatusIcon(status: Incident["status"]) {
   }
 
   if (status === "investigating") {
-    return (
-      <Search className="h-4 w-4 text-amber-600" />
-    );
+    return <Search className="h-4 w-4 text-amber-600" />;
   }
 
-  return (
-    <AlertTriangle className="h-4 w-4 text-red-600" />
-  );
+  return <AlertTriangle className="h-4 w-4 text-red-600" />;
 }
 
-function formatDate(value: string): string {
+function formatDate(value?: string): string {
+  if (!value) {
+    return "Unknown";
+  }
+
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
@@ -100,14 +100,14 @@ export default function IncidentTimeline({
                 </div>
 
                 {index < recentIncidents.length - 1 ? (
-                  <div className="mt-2 h-full w-px bg-slate-200" />
+                  <div className="mt-2 min-h-8 w-px flex-1 bg-slate-200" />
                 ) : null}
               </div>
 
               <div className="min-w-0 flex-1 pb-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="font-medium text-slate-900">
+                  <div className="min-w-0">
+                    <h3 className="truncate font-medium text-slate-900">
                       {incident.title}
                     </h3>
 
@@ -125,7 +125,7 @@ export default function IncidentTimeline({
                   </span>
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   <span className="capitalize">
                     {incident.status}
                   </span>

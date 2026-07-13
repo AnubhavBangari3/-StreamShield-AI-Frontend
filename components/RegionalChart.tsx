@@ -1,13 +1,15 @@
 "use client";
 
+import { useMemo } from "react";
+
 import {
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
 
 import type { StreamMetric } from "@/types/dashboard";
@@ -17,42 +19,59 @@ type RegionalData = {
   viewers: number;
 };
 
-type Props = {
+type RegionalChartProps = {
   data?: RegionalData[];
   metrics?: StreamMetric[];
 };
 
 export default function RegionalChart({
   data,
-  metrics,
-}: Props) {
-  // If data isn't passed, build it from metrics
-  const regionalData: RegionalData[] =
-    data ??
-    (() => {
-      const regionMap = new Map<string, number>();
+  metrics = [],
+}: RegionalChartProps) {
+  const regionalData = useMemo<RegionalData[]>(() => {
+    if (data) {
+      return data;
+    }
 
-      (metrics ?? []).forEach((metric) => {
-        regionMap.set(
-          metric.region,
-          (regionMap.get(metric.region) ?? 0) +
-            metric.concurrent_viewers,
-        );
-      });
+    const latestByStream = new Map<number, StreamMetric>();
 
-      return Array.from(regionMap.entries()).map(
-        ([region, viewers]) => ({
-          region,
-          viewers,
-        }),
+    for (const metric of metrics) {
+      const existing = latestByStream.get(metric.stream);
+
+      if (
+        !existing ||
+        new Date(metric.timestamp).getTime() >
+          new Date(existing.timestamp).getTime()
+      ) {
+        latestByStream.set(metric.stream, metric);
+      }
+    }
+
+    const regionMap = new Map<string, number>();
+
+    for (const metric of latestByStream.values()) {
+      const region = metric.region || "Unknown";
+
+      regionMap.set(
+        region,
+        (regionMap.get(region) ?? 0) +
+          (metric.concurrent_viewers ?? 0),
       );
-    })();
+    }
+
+    return Array.from(regionMap.entries())
+      .map(([region, viewers]) => ({
+        region,
+        viewers,
+      }))
+      .sort((first, second) => second.viewers - first.viewers);
+  }, [data, metrics]);
 
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-slate-900">
-          Viewers by Region
+          Viewers by region
         </h2>
 
         <p className="mt-1 text-sm text-slate-500">
@@ -67,7 +86,15 @@ export default function RegionalChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={regionalData}>
+            <BarChart
+              data={regionalData}
+              margin={{
+                top: 5,
+                right: 10,
+                left: 5,
+                bottom: 25,
+              }}
+            >
               <CartesianGrid
                 strokeDasharray="3 3"
                 stroke="#e2e8f0"
@@ -75,14 +102,44 @@ export default function RegionalChart({
 
               <XAxis
                 dataKey="region"
-                tick={{ fontSize: 12 }}
+                angle={-20}
+                textAnchor="end"
+                height={60}
+                interval={0}
+                tick={{
+                  fill: "#64748b",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
               />
 
               <YAxis
-                tick={{ fontSize: 12 }}
+                tick={{
+                  fill: "#64748b",
+                  fontSize: 11,
+                }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(value) =>
+                  new Intl.NumberFormat("en", {
+                    notation: "compact",
+                    maximumFractionDigits: 1,
+                  }).format(Number(value))
+                }
               />
 
-              <Tooltip />
+              <Tooltip
+                formatter={(value) => [
+                  Number(value).toLocaleString(),
+                  "Viewers",
+                ]}
+                contentStyle={{
+                  background: "#ffffff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "12px",
+                }}
+              />
 
               <Bar
                 dataKey="viewers"
